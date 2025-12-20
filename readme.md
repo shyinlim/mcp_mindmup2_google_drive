@@ -54,19 +54,14 @@ A Model Context Protocol (MCP) server that provides seamless integration between
 - Google Cloud Platform account
 
 ### Google Drive API Setup
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select existing one
-3. Enable [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)
-4. Create Service Account credentials:
-   - Go to "IAM & Admin" → "Service Accounts"
-   - Click "Create Service Account"
-   - Download the JSON key file
-5. Share Google Drive folder/file with Service Account:
-   - Open the JSON key file and find the `"client_email"` field
-   - Go to your Google Drive folder → Right-click → Share
-   - Paste the service account email and grant **Viewer** access
-   - Do **NOT** send invitation email (just share without notifying)
-6. Encode the JSON file to base64 (see [Generate Base64 Credential](#generate-base64-credential))
+
+| Step | Description | Image |
+|------|-------------|-------|
+| 1 | Go to [Google Cloud Console](https://console.cloud.google.com/) and create a new project or select an existing one | |
+| 2 | Enable [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com) in your project | |
+| 3 | Create Service Account credentials:<br>- Go to "IAM & Admin" → "Service Accounts"<br>- Click "Create Service Account"<br>- Download the JSON key file | |
+| 4 | Extract the service account email from JSON and encode to base64:<br>- Find `"client_email"` in the JSON file<br>- See [Generate Base64 Credential](#generate-base64-credential) section for encoding | |
+| 5 | Share your Google Drive folder with the Service Account:<br>- Right-click folder → Share<br>- Paste the service account email<br>- Grant **Viewer** access<br>- Do **NOT** send invitation | ![google_drive_share_list.jpg](readme/google_drive_share_list.jpg) |
 
 ### Run the Server
 For development:
