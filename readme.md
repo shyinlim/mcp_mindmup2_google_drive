@@ -80,13 +80,15 @@ Add this server to your MCP client configuration:
 
 ```json
 {
-  "mcpServers": {
-    "mindmup-gdrive": {
-      "command": "mcp-remote",
-      "args": ["http://localhost:9802/sse"]
+    "mcpServers": {
+      "mindmup-gdrive": {
+        "url": "http://your-server:9802/sse",
+        "headers": {
+          "X-Google-Credential": "eyJ0eXBlIjoic2VydmljZV9hY2NvdW50Ii..."
+        }
+      }
     }
   }
-}
 ```
 
 ## 🔍 Future Plan

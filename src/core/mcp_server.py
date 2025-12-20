@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 from mcp.server.fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 from src.model.gdrive_model import SearchQuery
 from src.utility.logger import get_logger
 from starlette.responses import JSONResponse
@@ -21,18 +22,42 @@ class MCPServer:
             host=host,
             port=int(port)
         )
-        self.gdrive_client = None
-        self.gdrive_feature = None
         self._setup_tool()
         self._setup_sse_route()
 
-    def _check_gdrive_initialized(self):
-        if not self.gdrive_feature:
-            raise ValueError("Google Drive not initialized.")
+    async def _get_gdrive_feature_from_header(self) -> GoogleDriveFeature:
+        """Get GDrive feature from request header credential.
 
-    async def _find_file_by_name(self, file_name: str) -> Optional[str]:
+        Reads X-Google-Credential header (base64 encoded service account JSON),
+        creates a new GoogleDriveClient, authenticates, and returns GoogleDriveFeature.
+
+        Returns:
+            GoogleDriveFeature instance authenticated with user's credential.
+
+        Raises:
+            ValueError: If header is missing or authentication fails.
+        """
+        headers = get_http_headers()
+        credential_base64 = headers.get('x-google-credential')
+
+        if not credential_base64:
+            raise ValueError(
+                "Missing X-Google-Credential header. "
+                "Please set your base64 encoded service account JSON in mcp.json headers."
+            )
+
+        # Create new client and authenticate
+        client = GoogleDriveClient()
+        auth_result = await client.authenticate_from_base64(credential_base64)
+
+        if not auth_result.is_success:
+            raise ValueError(f"Google Drive authentication failed: {auth_result.detail}")
+
+        return GoogleDriveFeature(client)
+
+    async def _find_file_by_name(self, gdrive_feature: GoogleDriveFeature, file_name: str) -> Optional[str]:
         """Find file ID by name. Returns None if not found."""
-        mindmup_file = await self.gdrive_feature.search_mindmup_file(name_contain=file_name)
+        mindmup_file = await gdrive_feature.search_mindmup_file(name_contain=file_name)
         if not mindmup_file:
             return None
 
@@ -40,10 +65,12 @@ class MCPServer:
         logger.info(f'Found file {mindmup_file[0].name} with ID {file_id}')
         return file_id
 
-    async def _download_and_parse_mindmup(self, file_id: str) -> Tuple[Optional[Any], Optional[str], Dict[str, Any]]:
+    async def _download_and_parse_mindmup(
+            self, gdrive_feature: GoogleDriveFeature, file_id: str
+    ) -> Tuple[Optional[Any], Optional[str], Dict[str, Any]]:
         """Download and parse mindmup file. Returns (mindmup, file_content, error_dict)."""
         # Download file
-        download_result = await self.gdrive_feature.download_file_content(file_id=file_id)
+        download_result = await gdrive_feature.download_file_content(file_id=file_id)
         if not download_result.is_success:
             return None, None, {"error": download_result.detail}
 
@@ -149,25 +176,23 @@ class MCPServer:
             self, max_result: int = 1000, file_type: Optional[str] = None,
             name_contain: Optional[str] = None) -> Dict[str, Any]:
         """List out Gdrive file list."""
-
         try:
-            self._check_gdrive_initialized()
-        except ValueError as e:
-            return {"error": str(e)}
+            gdrive_feature = await self._get_gdrive_feature_from_header()
 
-        try:
             query = SearchQuery(
                 max_result=max_result,
                 mime_type=[file_type] if file_type else [],
                 query=name_contain
             )
-            result = await self.gdrive_feature.list_file(query=query)
+            result = await gdrive_feature.list_file(query=query)
 
             if not result.is_success:
                 return {"error": result.detail}
 
             return result.detail
 
+        except ValueError as e:
+            return {"error": str(e)}
         except Exception as e:
             error_message = f'gdrive_tool_list_file error: {e}'
             logger.error(error_message)
@@ -181,31 +206,27 @@ class MCPServer:
             file_id: Direct file ID to download.
             file_name: File name to search for (will use the first match).
         """
-
-        try:
-            self._check_gdrive_initialized()
-        except ValueError as e:
-            return {"error": str(e)}
-
         if not file_id and not file_name:
             return {"error": "Either file_id or file_name must be provided."}
 
         try:
+            gdrive_feature = await self._get_gdrive_feature_from_header()
+
             # If file_name is provided, search for the file first
             if file_name and not file_id:
-                file_id = await self._find_file_by_name(file_name)
+                file_id = await self._find_file_by_name(gdrive_feature, file_name)
                 if not file_id:
                     return {"error": f"No MindMup file found with name containing '{file_name}'."}
 
             # Check file metadata first
-            file_metadata = await self.gdrive_feature.get_file_metadata(file_id)
+            file_metadata = await gdrive_feature.get_file_metadata(file_id)
             file_size = 0
             if file_metadata and 'size' in file_metadata:
                 file_size = int(file_metadata.get('size', 0))
                 logger.info(f'File {file_id} size: {file_size} bytes ({round(file_size / (1024 * 1024), 2)} MB)')
 
             # Download and parse
-            mindmup, file_content, error = await self._download_and_parse_mindmup(file_id)
+            mindmup, file_content, error = await self._download_and_parse_mindmup(gdrive_feature, file_id)
             if error:
                 return error
 
@@ -235,6 +256,8 @@ class MCPServer:
                 "file_id": file_id
             }
 
+        except ValueError as e:
+            return {"error": str(e)}
         except Exception as e:
             error_message = f'get_single_mindmup_tool error: {e}'
             logger.error(error_message)
@@ -248,28 +271,24 @@ class MCPServer:
             file_name: File name to search for.
             file_id: Direct file ID.
         """
-
-        try:
-            self._check_gdrive_initialized()
-        except ValueError as e:
-            return {"error": str(e)}
-
         if not file_id and not file_name:
             return {"error": "Either file_id or file_name must be provided."}
 
         try:
+            gdrive_feature = await self._get_gdrive_feature_from_header()
+
             # Find file if needed
             if file_name and not file_id:
-                file_id = await self._find_file_by_name(file_name)
+                file_id = await self._find_file_by_name(gdrive_feature, file_name)
                 if not file_id:
                     return {"error": f"No MindMup file found with name '{file_name}'."}
 
             # Get file metadata
-            file_metadata = await self.gdrive_feature.get_file_metadata(file_id)
+            file_metadata = await gdrive_feature.get_file_metadata(file_id)
             file_size = int(file_metadata.get('size', 0)) if file_metadata else 0
 
             # Download and parse
-            mindmup, file_content, error = await self._download_and_parse_mindmup(file_id)
+            mindmup, file_content, error = await self._download_and_parse_mindmup(gdrive_feature, file_id)
             if error:
                 return error
 
@@ -311,6 +330,8 @@ class MCPServer:
 
             return summary
 
+        except ValueError as e:
+            return {"error": str(e)}
         except Exception as e:
             error_message = f'analyze_mindmup_summary_tool error: {e}'
             logger.error(error_message)
@@ -325,15 +346,11 @@ class MCPServer:
             chunk_index: Which chunk to retrieve (0-based). Use -1 for search-only mode.
             search_keyword: Optional keyword to search for in the mindmap.
         """
-
         try:
-            self._check_gdrive_initialized()
-        except ValueError as e:
-            return {"error": str(e)}
+            gdrive_feature = await self._get_gdrive_feature_from_header()
 
-        try:
             # Download and parse
-            mindmup, file_content, error = await self._download_and_parse_mindmup(file_id=file_id)
+            mindmup, file_content, error = await self._download_and_parse_mindmup(gdrive_feature, file_id)
             if error:
                 return error
 
@@ -388,6 +405,8 @@ class MCPServer:
 
             return result
 
+        except ValueError as e:
+            return {"error": str(e)}
         except Exception as e:
             error_message = f'get_mindmup_chunk_tool error: {e}'
             logger.error(error_message)
@@ -401,17 +420,13 @@ class MCPServer:
         Args:
             folder_id: Specific folder to search in. If None, searches globally.
             name_contain: Filter by file name containing this text.
-            max_result: Maximum number of files to process (default: 5).
+            max_result: Maximum number of files to process (default: 10).
         """
-
         try:
-            self._check_gdrive_initialized()
-        except ValueError as e:
-            return {"error": str(e)}
+            gdrive_feature = await self._get_gdrive_feature_from_header()
 
-        try:
             # Searching all mindmup files using gdrive_feature
-            mindmup_file = await self.gdrive_feature.search_mindmup_file(
+            mindmup_file = await gdrive_feature.search_mindmup_file(
                 folder_id=folder_id,
                 name_contain=name_contain
             )
@@ -430,7 +445,7 @@ class MCPServer:
                     # Check file size before processing
                     if hasattr(file_info, 'size') and file_info.size:
                         file_size = int(file_info.size)
-                        if not self.gdrive_feature.check_file_size(file_size, file_info.name):
+                        if not gdrive_feature.check_file_size(file_size, file_info.name):
                             # Skip large files and add a summary entry
                             result_data.append({
                                 "file_id": file_info.id,
@@ -443,11 +458,10 @@ class MCPServer:
                             continue
 
                     # Download the file from GDrive
-                    download_result_frm_gdrive = await self.gdrive_feature.download_file_content(file_id=file_info.id)
+                    download_result_frm_gdrive = await gdrive_feature.download_file_content(file_id=file_info.id)
 
                     if download_result_frm_gdrive.is_success:
-                        file_content = download_result_frm_gdrive.detail.get(
-                            'content_str')
+                        file_content = download_result_frm_gdrive.detail.get('content_str')
                         if file_content:
                             try:
                                 mindmap_data = await self._process_mindmup_content(file_info.id, file_content)
@@ -481,6 +495,8 @@ class MCPServer:
                 "count": len(result_data)
             }
 
+        except ValueError as e:
+            return {"error": str(e)}
         except Exception as e:
             error_message = f'get_multiple_mindmup_tool error: {e}'
             logger.error(error_message)
@@ -503,34 +519,15 @@ class MCPServer:
                 "client_ip": request.client.host,
             })
 
-        @self.mcp.custom_route(path='/gdrive_client', methods=['GET'])
-        async def gdrive_client_health(request):
+        @self.mcp.custom_route(path='/health', methods=['GET'])
+        async def health_check(request):
+            """Health check endpoint."""
             return JSONResponse({
                 "result": "success",
                 "time": datetime.now().isoformat(),
-                "initialize_gdrive_client": self.gdrive_client is not None
+                "message": "MCP server is running. Credential is provided per-request via X-Google-Credential header."
             })
-
-    async def initialize_gdrive_client(self):
-        """Initial Gdrive."""
-        try:
-            self.gdrive_client = GoogleDriveClient()
-            auth_result = await self.gdrive_client.authenticate()
-
-            if not auth_result.is_success:
-                logger.error(
-                    f'Gdrive mcp_server initial failed: {auth_result.detail}')
-                return False
-
-            self.gdrive_feature = GoogleDriveFeature(self.gdrive_client)
-            return True
-
-        except Exception as e:
-            logger.error(f'Gdrive mcp_server initial error: {e}')
-            return False
 
     def start(self, transport: str = 'sse'):
         """For starting MCP Sever. 'run.py' will call this function."""
-
-        # Run the server
-        self.mcp.run(transport=transport)  # Sever-Sent Event (For HTTP mode)
+        self.mcp.run(transport=transport)
