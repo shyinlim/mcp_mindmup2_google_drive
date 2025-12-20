@@ -4,10 +4,10 @@ from typing import Optional, Any
 
 @dataclass
 class OperationResult:
+    """Simple result wrapper for operations."""
 
     is_success: bool
     detail: Optional[Any] = None
-    error: Optional[str] = None
 
     @classmethod
     def success(cls, detail: Any = None) -> 'OperationResult':

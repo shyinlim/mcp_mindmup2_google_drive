@@ -6,14 +6,11 @@ from src.model.gdrive_model import SearchQuery, create_file_info
 from src.utility.logger import get_logger
 
 from src.core.gdrive_client import GoogleDriveClient
-from src.utility.enum import MimeType
 
 logger = get_logger(__name__)
 
 
 class GoogleDriveFeature:
-
-    MAX_FILE_SIZE_BYTES = 100000000  # 100MB - With chunking support
 
     def __init__(self, client: GoogleDriveClient):
         self.client = client
@@ -55,100 +52,47 @@ class GoogleDriveFeature:
             logger.error(error_message)
             return OperationResult.fail(detail=error_message)
 
-    async def search_mindmup_file(self, folder_id: Optional[str] = None, name_contain: Optional[str] = None) -> List:
-        """Search for MindMup files in Google Drive."""
+    async def search_mindmup_file(self, name_contain: Optional[str] = None) -> List:
+        """Search for MindMup files in Google Drive.
+
+        Args:
+            name_contain: Optional filename filter.
+
+        Returns:
+            List of FileInfo objects for MindMup files, sorted by modified time.
+        """
         try:
-            mindmup_file = []
-            all_search_patterns = []
-
-            # Primary search patterns
+            # Build search patterns
+            patterns = []
             if name_contain:
-                # If user provides specific search term, prioritize it
-                all_search_patterns.append(name_contain)
-                # Also try variations
-                all_search_patterns.extend([f'{name_contain}.mup', f'{name_contain} mindmap'])
+                patterns.append(name_contain)
+            patterns.extend(['.mup', 'mindmup'])
 
-            # Always search for .mup files and common mindmap patterns
-            all_search_patterns.extend(['.mup', 'mindmap', 'mindmup', 'mind map', 'mind-map'])
+            # Search and collect unique mindmup files
+            found_files = {}  # Use dict for deduplication by file ID
 
-            # Remove duplicate while preserving order
-            seen_pattern = set()
-            unique_pattern = []
-            for pattern in all_search_patterns:
-                if pattern.lower() not in seen_pattern:
-                    unique_pattern.append(pattern)
-                    seen_pattern.add(pattern.lower())
-
-            logger.info(f'Searching for MindMup file with pattern: {unique_pattern}')
-
-            # Search with each pattern
-            for pattern in unique_pattern:
-                logger.info(f'Searching with pattern: {pattern}')
-                query_pattern = SearchQuery(
+            for pattern in patterns:
+                query = SearchQuery(
                     max_result=1000,
-                    folder_id=folder_id,
                     name_contain=pattern,
                     include_trashed=False
                 )
 
-                pattern_result = await self.list_file(query=query_pattern)
-                if pattern_result.is_success:
-                    pattern_file = pattern_result.detail.get('files', [])
-                    logger.info(f'Pattern "{pattern}" found {len(pattern_file)} file')
-
-                    # Filter for potential mindmup file
-                    for f in pattern_file:
-                        if f.is_mindmup() and f.id not in [existing.id for existing in mindmup_file]:
-                            mindmup_file.append(f)
-                            logger.info(f'Added potential MindMup file: {f.name} (ID: {f.id})')
-
-            # If still no results, try broader MIME type search
-            if not mindmup_file:
-                logger.info('Pattern search found no MindMup files, trying MIME type search')
-
-                # Search with broader MIME type
-                mime_type_to_try = [
-                    [MimeType.JSON],
-                    [MimeType.TEXT],
-                    [MimeType.MINDMUP],
-                    [MimeType.OCTET],
-                    [MimeType.JSON, MimeType.TEXT]  # Combined search
-                ]
-
-                for mime_type_list in mime_type_to_try:
-                    query_mime = SearchQuery(
-                        max_result=1000,
-                        folder_id=folder_id,
-                        mime_type=mime_type_list,
-                        include_trashed=False
-                    )
-
-                    mime_result = await self.list_file(query=query_mime)
-                    if mime_result.is_success:
-                        all_file = mime_result.detail.get('files', [])
-                        logger.info(f'MIME type {mime_type_list} search found {len(all_file)} file')
-
-                        for f in all_file:
-                            if f.is_mindmup() and f.id not in [existing.id for existing in mindmup_file]:
-                                mindmup_file.append(f)
-                                logger.info(f'Added MindMup file from MIME search: {f.name} (ID: {f.id})')
-
-                    # Stop if we found some files
-                    if mindmup_file:
-                        break
+                result = await self.list_file(query=query)
+                if result.is_success:
+                    for f in result.detail.get('files', []):
+                        if f.is_mindmup() and f.id not in found_files:
+                            found_files[f.id] = f
 
             # Sort by modification time (newest first)
-            mindmup_file.sort(key=lambda x: x.modified_time or x.created_time, reverse=True)
+            mindmup_files = list(found_files.values())
+            mindmup_files.sort(key=lambda x: x.modified_time or x.created_time, reverse=True)
 
-            logger.info(f'search_mindmup_file found {len(mindmup_file)} MindMup file total')
-            for f in mindmup_file:
-                logger.info(f'  - {f.name} (ID: {f.id}, MIME: {f.mime_type})')
-
-            return mindmup_file
+            logger.info(f'search_mindmup_file found {len(mindmup_files)} files')
+            return mindmup_files
 
         except Exception as e:
-            error_message = f'search_mindmup_file error: {e}'
-            logger.error(error_message)
+            logger.error(f'search_mindmup_file error: {e}')
             return []
 
     async def get_file_metadata(self, file_id: str) -> Dict[str, Any]:
@@ -237,42 +181,30 @@ class GoogleDriveFeature:
             logger.error(error_message)
             return OperationResult.fail(error_message)
 
-    def check_file_size(self, file_size_bytes: int, file_name: str) -> bool:
-        """Check if file size is within acceptable limits."""
-        if file_size_bytes > self.MAX_FILE_SIZE_BYTES:
-            logger.warning(
-                f'Skipping large file {file_name}: {file_size_bytes} bytes > {self.MAX_FILE_SIZE_BYTES} bytes limit')
-            return False
-        return True
-
     def _cleanup_cache(self):
-        """Clean up the cache almost expire or already expired"""
+        """Remove expired cache entries and enforce max cache size."""
         current_time = time.time()
 
-        # Clean up the cache almost expire
-        expired_key = [
+        # Remove expired entries
+        expired_keys = [
             file_id for file_id, (_, timestamp) in self._file_cache.items()
             if current_time - timestamp > self._cache_ttl
         ]
 
-        for key in expired_key:
+        for key in expired_keys:
             del self._file_cache[key]
-            logger.info(f'Removed expired cache for: {key}')
 
-        # If cache key too much, then remove the oldest one
+        # If cache is too large, remove oldest entries
         if len(self._file_cache) > self._max_cache_size:
-            # order by time
-            sorted_item = sorted(
+            sorted_items = sorted(
                 self._file_cache.items(),
-                key=lambda x: x[1][1]  # order by time
+                key=lambda x: x[1][1]
             )
 
-            item_to_remove = len(self._file_cache) - self._max_cache_size
-            for i in range(item_to_remove):
-                file_id = sorted_item[i][0]
+            items_to_remove = len(self._file_cache) - self._max_cache_size
+            for i in range(items_to_remove):
+                file_id = sorted_items[i][0]
                 del self._file_cache[file_id]
-                logger.info(f'Removed old cache for: {file_id}')
 
-        if expired_key or len(self._file_cache) != len(self._file_cache):
-            logger.info(
-                f'Cache cleanup: {len(self._file_cache)}')
+        if expired_keys:
+            logger.info(f'Cache cleanup: removed {len(expired_keys)} expired, {len(self._file_cache)} remaining')
