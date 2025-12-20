@@ -245,6 +245,58 @@ class MindmupParser:
         return summary
 
     @staticmethod
+    def get_chunk_previews(content: str, chunk_size: int = None) -> List[Dict[str, Any]]:
+        """Generate previews for each chunk showing what content it contains.
+
+        Args:
+            content: Full text content to be chunked
+            chunk_size: Size of each chunk (default: CLAUDE_MAX_CONTENT_LENGTH)
+
+        Returns:
+            List of chunk previews with index, start content, and key identifiers
+        """
+        chunk_list = MindmupParser.split_content_to_chunk(content, chunk_size)
+        previews = []
+
+        for chunk in chunk_list:
+            chunk_content = chunk["content"]
+
+            # Get first 200 chars as preview start
+            preview_start = chunk_content[:200].strip()
+            if len(chunk_content) > 200:
+                preview_start += "..."
+
+            # Extract identifiable items from chunk (lines that look like section headers)
+            lines = chunk_content.split('\n')
+            key_items = []
+            for line in lines[:50]:  # Check first 50 lines
+                line = line.strip()
+                # Identify potential section headers (short lines, often titles)
+                if line and 5 < len(line) < 100 and not line.startswith('{') and not line.startswith('[Note]'):
+                    # Skip lines that look like data/code
+                    if not any(c in line for c in ['=', ':', '{', '}', '()', '"']):
+                        if line not in key_items:
+                            key_items.append(line)
+                    # Also capture lines with common patterns like "TestCase:", "Spec", API paths
+                    elif line.startswith('TestCase') or line.startswith('Spec') or '/' in line[:20]:
+                        simplified = line.split('[')[0].strip()[:80]
+                        if simplified and simplified not in key_items:
+                            key_items.append(simplified)
+
+                if len(key_items) >= 5:
+                    break
+
+            previews.append({
+                "chunk_index": chunk["chunk_index"],
+                "total_chunks": chunk["total_chunk"],
+                "char_range": f"{chunk['start_pos']}-{chunk['end_pos']}",
+                "preview_start": preview_start,
+                "key_items": key_items
+            })
+
+        return previews
+
+    @staticmethod
     def search_node(node: MindmupNode, keyword: str, max_result: int = 50) -> List[Dict[str, Any]]:
         """Search for node containing keyword in title.
 

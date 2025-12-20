@@ -257,7 +257,10 @@ class MCPServer:
 
     async def analyze_mindmup_summary_tool(
             self, file_name: Optional[str] = None, file_id: Optional[str] = None) -> Dict[str, Any]:
-        """Analyze and provide summary for large mindmup file.
+        """Analyze and provide comprehensive summary for mindmup file.
+
+        Returns complete overview including all section titles and chunk previews,
+        so AI can understand full content scope before reading specific chunks.
 
         Args:
             file_name: File name to search for.
@@ -284,26 +287,54 @@ class MCPServer:
             if error:
                 return error
 
+            # Extract ALL text content for comprehensive analysis
+            all_text_list = mindmup.extract_text_content()
+            all_text = ' '.join(all_text_list) if all_text_list else ''
+            content_length = len(all_text)
+
+            # Get ALL node titles (no limit) for complete overview
+            all_titles = MindmupParser.get_all_node_title(mindmup.root_node, max_title=5000)
+
             # Extract structure
             structured_data = MindmupParser.extract_mindmap_structure(mindmup)
 
-            # Build summary
+            # Build main sections from hierarchy
             main_sections = []
             hierarchy = structured_data.get('hierarchy', {})
             if 'children' in hierarchy:
-                main_sections = [s.get('title', '') for s in hierarchy['children'][:5]]
+                main_sections = [s.get('title', '') for s in hierarchy['children']]
 
-            return {
+            # Build result
+            result = {
                 "file_info": {
                     "file_id": file_id,
                     "file_name": file_metadata.get('name', 'Unknown'),
                     "file_size_mb": round(file_size / (1024 * 1024), 2) if file_size else 0,
-                    "title": mindmup.title
+                    "title": mindmup.title,
+                    "content_length": content_length
                 },
                 "overview": structured_data.get('overview'),
                 "main_sections": main_sections,
+                "all_section_titles": all_titles,
                 "total_nodes": mindmup.get_node_count()
             }
+
+            # Add chunk information if content is large enough to be chunked
+            if content_length > MindmupParser.CLAUDE_MAX_CONTENT_LENGTH:
+                chunk_previews = MindmupParser.get_chunk_previews(all_text)
+                result["chunking_info"] = {
+                    "total_chunks": len(chunk_previews),
+                    "chunk_size_limit": MindmupParser.CLAUDE_MAX_CONTENT_LENGTH,
+                    "chunk_previews": chunk_previews,
+                    "usage_hint": f"Use get_mindmup_chunk_tool(file_id='{file_id}', chunk_index=N) to read specific chunks"
+                }
+            else:
+                result["chunking_info"] = {
+                    "total_chunks": 1,
+                    "message": "File is small enough to read in single request"
+                }
+
+            return result
 
         except ValueError as e:
             return {"error": str(e)}
