@@ -1,5 +1,5 @@
 import json
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 
 from src.model.mindmup_model import MindmupNode, Mindmup
 from src.utility.logger import get_logger
@@ -67,15 +67,9 @@ class MindmupParser:
 
     @staticmethod
     def extract_mindmap_structure(mindmap: Mindmup) -> Dict[str, Any]:
-        """Extract structured information from large mindmaps focusing on hierarchy and key content."""
+        """Extract structured information from mindmaps."""
         try:
-            # Extract key section for detailed analysis
-            key_section = MindmupParser.extract_key_section(mindmap.root_node)
-
-            # Create a focused summary of main test cases/scenarios
-            test_case_summary = MindmupParser.extract_test_cases(mindmap.root_node, max_cases=10)
-
-            structure = {
+            return {
                 "overview": {
                     "title": mindmap.title,
                     "total_nodes": mindmap.get_node_count(),
@@ -84,11 +78,9 @@ class MindmupParser:
                     "modified": mindmap.modified_time.isoformat() if mindmap.modified_time else None
                 },
                 "hierarchy": MindmupParser.extract_node_hierarchy(mindmap.root_node, max_depth=10, max_children_per_level=10),
-                "key_section": key_section,
-                "test_cases": test_case_summary,
-                "all_title": MindmupParser.get_all_node_title(mindmap.root_node, max_title=500)
+                "key_sections": MindmupParser.extract_key_section(mindmap.root_node),
+                "all_titles": MindmupParser.get_all_node_title(mindmap.root_node, max_title=500)
             }
-            return structure
         except Exception as e:
             logger.error(f'Error extracting mindmap structure: {e}')
             return {"error": f"Failed to extract structure: {e}"}
@@ -153,90 +145,6 @@ class MindmupParser:
             key_section.append(section_info)
 
         return key_section
-
-    @staticmethod
-    def extract_test_cases(root_node: MindmupNode, max_cases: int = 10) -> List[Dict[str, Any]]:
-        """Extract test cases or main scenarios from the mindmap."""
-        test_case_list = []
-        main_section = []  # Store main sections
-
-        # Look for nodes that might contain test cases
-        case_keyword = ['case', 'test', 'scenario', '測試', '案例', '場景', 'story', 'flow', '流程',
-                        '功能', 'feature', '模組', 'module', '需求', 'requirement']
-
-        def find_test_nodes(node: MindmupNode, depth: int = 0, parent_title: str = ''):
-            if len(test_case_list) >= max_cases * 2:  # Collect more initially
-                return
-
-            node_title_lower = node.title.lower()
-
-            # Store main sections (depth 1)
-            if depth == 1:
-                main_section.append({
-                    "title": node.title,
-                    "children_count": len(node.children)
-                })
-
-            # Check if this node might be a test case
-            is_potential_case = any(keyword in node_title_lower for keyword in case_keyword)
-
-            # For app testing, also look for user action patterns
-            action_keyword = ['註冊', '登入', '登錄', 'login', 'register', '匯款', '轉帳', 'transfer',
-                              '查詢', 'query', '設定', 'setting', '驗證', 'verify', 'validation']
-            is_action = any(keyword in node_title_lower for keyword in action_keyword)
-
-            if is_potential_case or is_action or (depth <= 2 and len(node.children) > 0):
-                case_info = {
-                    "title": node.title,
-                    "depth": depth,
-                    "parent": parent_title,
-                    "sub_items": [],
-                    "priority": 0
-                }
-
-                # Calculate priority based on keywords
-                if is_potential_case:
-                    case_info["priority"] += 2
-                if is_action:
-                    case_info["priority"] += 1
-                if depth <= 2:
-                    case_info["priority"] += (3 - depth)
-
-                # Get immediate children as sub-items
-                for child in node.children[:8]:  # Get more sub-items for context
-                    case_info["sub_items"].append(child.title)
-
-                if case_info["sub_items"] or case_info["priority"] > 0:
-                    test_case_list.append(case_info)
-
-            # Continue searching in children
-            for child in node.children:
-                find_test_nodes(child, depth + 1, node.title)
-
-        find_test_nodes(root_node)
-
-        # Sort by priority and depth
-        test_case_list.sort(key=lambda x: (-x['priority'], x['depth']))
-
-        # If we have main sections, ensure they're represented
-        result = []
-        for section in main_section[:3]:  # Include top 3 main sections
-            result.append({
-                "title": section["title"],
-                "type": "main_section",
-                "children_count": section["children_count"]
-            })
-
-        # Add the most relevant test cases
-        for case in test_case_list[:max_cases - len(result)]:
-            result.append({
-                "title": case["title"],
-                "type": "test_case" if case["priority"] > 1 else "feature",
-                "parent": case["parent"] if case["parent"] else None,
-                "sub_items": case["sub_items"][:5] if case["sub_items"] else None
-            })
-
-        return result[:max_cases]
 
     @staticmethod
     def get_all_node_title(node: MindmupNode, max_title: int = 2000) -> List[str]:
@@ -309,34 +217,6 @@ class MindmupParser:
             chunk["total_chunk"] = len(chunk_list)
 
         return chunk_list
-
-    @staticmethod
-    def handle_large_content(content: str, file_id: str) -> Tuple[str, bool, int]:
-        """Handle large content that exceeds Claude's maximum content length."""
-        original_length = len(content)
-        content_truncated = False
-
-        if original_length > MindmupParser.CLAUDE_MAX_CONTENT_LENGTH:
-            # Smart truncation: try to keep complete sentences/nodes
-            truncated_content = content[:MindmupParser.CLAUDE_MAX_CONTENT_LENGTH]
-
-            # Find the last complete sentence or reasonable break point
-            last_period = truncated_content.rfind('.')
-            last_newline = truncated_content.rfind('\n')
-            last_space = truncated_content.rfind(' ')
-
-            # Use the best break point found
-            break_point = max(last_period, last_newline, last_space)
-            if break_point > MindmupParser.CLAUDE_MAX_CONTENT_LENGTH * 0.8:  # If break point is reasonably close
-                content = truncated_content[:break_point + 1]
-            else:
-                content = truncated_content
-
-            content_truncated = True
-            logger.warning(
-                f'Content truncated for file {file_id}: {original_length} -> {len(content)} characters')
-
-        return content, content_truncated, original_length
 
     @staticmethod
     def create_content_summary(content: str, max_length: int = 1000) -> str:

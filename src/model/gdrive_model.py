@@ -2,48 +2,45 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
-from src.utility.enum import FileStatus, MimeType, GOOGLE_APPS_MIME_TYPE
+from src.utility.enum import MimeType, GOOGLE_APPS_MIME_TYPE
 
 
 @dataclass
 class SearchQuery:
-    """Define GDrive search condition."""
+    """Google Drive search query parameters."""
 
-    query: Optional[str] = None
+    name_contain: Optional[str] = None
     folder_id: Optional[str] = None
     mime_type: List[str] = field(default_factory=list)
     max_result: int = 1000
     include_trashed: bool = False
-    name_contain: Optional[str] = None
 
     def to_drive_query(self) -> str:
-        """ Covert GDrive API query result to str format."""
-
-        condition = []
+        """Convert to Google Drive API query string."""
+        conditions = []
 
         if not self.include_trashed:
-            condition.append('trashed=false')
+            conditions.append('trashed=false')
 
         if self.folder_id:
-            condition.append(f'"{self.folder_id}" in parents')
-
-        if self.query:
-            condition.append(f'name contains "{self.query}"')
+            conditions.append(f'"{self.folder_id}" in parents')
 
         if self.name_contain:
-            condition.append(f'name contains "{self.name_contain}"')
+            conditions.append(f'name contains "{self.name_contain}"')
 
         if self.mime_type:
             mime_conditions = [
-                f'mimeType="{mt.value if hasattr(mt, "value") else str(mt)}"' for mt in self.mime_type]
-            condition.append(f"({' or '.join(mime_conditions)})")
+                f'mimeType="{mt.value if hasattr(mt, "value") else str(mt)}"'
+                for mt in self.mime_type
+            ]
+            conditions.append(f"({' or '.join(mime_conditions)})")
 
-        return ' and '.join(condition) if condition else ''
+        return ' and '.join(conditions) if conditions else ''
 
 
 @dataclass
 class FileInfo:
-    """Gdrive's file format, type."""
+    """Google Drive file metadata."""
 
     id: str
     name: str
@@ -53,12 +50,8 @@ class FileInfo:
     created_time: Optional[datetime] = None
     parents: List[str] = field(default_factory=list)
     web_view_link: Optional[str] = None
-    web_content_link: Optional[str] = None
-    status: FileStatus = FileStatus.ACTIVE
-    description: Optional[str] = None
     starred: bool = False
     shared: bool = False
-    owned_by_me: bool = True
 
     def is_folder(self) -> bool:
         return self.mime_type == MimeType.FOLDER
@@ -92,10 +85,6 @@ class FileInfo:
                 return True
 
         return False
-
-    def is_downloadable(self) -> bool:
-        """Check the download type, exclude Google official type"""
-        return self.mime_type not in GOOGLE_APPS_MIME_TYPE
 
 
 def parse_drive_time(dt_str: Optional[str]) -> Optional[datetime]:

@@ -86,91 +86,66 @@ class MCPServer:
             return None, None, {"error": f"Parse error: {e}"}
 
     async def _process_mindmup_content(self, file_id: str, file_content: str) -> Dict[str, Any]:
-        """Process mindmup content with size handling."""
+        """Process mindmup content with size-based handling.
+
+        Returns different content types based on size:
+        - full: < 800KB, returns complete content
+        - structured: 800KB - 1MB, returns structured summary
+        - chunked: > 800KB text, returns chunk metadata for pagination
+        """
         try:
             mindmup = MindmupParser.parse_content(content=file_content)
         except Exception as e:
             return {"error": f"Mindmup parse error: {e}"}
 
-        # Process content
+        # Extract text content
         all_text_list = mindmup.extract_text_content()
         all_text = ' '.join(all_text_list) if all_text_list else ''
-        original_content_length = len(all_text)
+        content_length = len(all_text)
 
-        # For very large content (>800KB text), always use chunked approach
-        # This handles files that are 20MB+ as mentioned by user
-        if original_content_length > 800 * 1024:
-            logger.info(f'Using chunked extraction for large content {file_id}: {original_content_length} characters')
+        # Base result (common fields)
+        result = {
+            "title": mindmup.title,
+            "id": mindmup.id,
+            "format_version": mindmup.format_version,
+            "node_count": mindmup.get_node_count(),
+            "original_content_length": content_length,
+            "metadata": {
+                "created_time": mindmup.created_time.isoformat() if mindmup.created_time else None,
+                "modified_time": mindmup.modified_time.isoformat() if mindmup.modified_time else None,
+                "author": mindmup.author
+            }
+        }
 
-            # Split content into chunk
+        # Large content (> 800KB): use chunked approach
+        if content_length > 800 * 1024:
             chunk_list = MindmupParser.split_content_to_chunk(all_text)
-
-            # Also get structured overview
-            structured_data = MindmupParser.extract_mindmap_structure(mindmup)
-
-            # Create chunk metadata without actual content to avoid size limit
-            chunk_metadata = []
-            for chunk in chunk_list:
-                chunk_metadata.append({
-                    "chunk_index": chunk["chunk_index"],
-                    "total_chunk": chunk["total_chunk"],
-                    "start_pos": chunk["start_pos"],
-                    "end_pos": chunk["end_pos"],
-                    "size": len(chunk["content"])
-                })
-
-            return {
-                "title": mindmup.title,
-                "id": mindmup.id,
-                "format_version": mindmup.format_version,
-                "node_count": mindmup.get_node_count(),
-                "content_type": "chunked",
-                "total_chunk": len(chunk_list),
-                "chunk_metadata": chunk_metadata,
-                "structured_overview": structured_data,
-                "original_content_length": original_content_length,
-                "metadata": {
-                    "created_time": mindmup.created_time.isoformat() if mindmup.created_time else None,
-                    "modified_time": mindmup.modified_time.isoformat() if mindmup.modified_time else None,
-                    "author": mindmup.author
+            result["content_type"] = "chunked"
+            result["total_chunk"] = len(chunk_list)
+            result["chunk_metadata"] = [
+                {
+                    "chunk_index": c["chunk_index"],
+                    "total_chunk": c["total_chunk"],
+                    "start_pos": c["start_pos"],
+                    "end_pos": c["end_pos"],
+                    "size": len(c["content"])
                 }
-            }
-        # For medium content (800KB - 1MB), use structured extraction
-        elif original_content_length > MindmupParser.CLAUDE_MAX_CONTENT_LENGTH:
-            logger.info(f'Using structured extraction for medium content {file_id}: {original_content_length} characters')
-            structured_data = MindmupParser.extract_mindmap_structure(mindmup)
+                for c in chunk_list
+            ]
+            result["structured_overview"] = MindmupParser.extract_mindmap_structure(mindmup)
 
-            return {
-                "title": mindmup.title,
-                "id": mindmup.id,
-                "format_version": mindmup.format_version,
-                "node_count": mindmup.get_node_count(),
-                "structured_content": structured_data,
-                "content_type": "structured",
-                "original_content_length": original_content_length,
-                "metadata": {
-                    "created_time": mindmup.created_time.isoformat() if mindmup.created_time else None,
-                    "modified_time": mindmup.modified_time.isoformat() if mindmup.modified_time else None,
-                    "author": mindmup.author
-                }
-            }
+        # Medium content (800KB - 1MB): use structured extraction
+        elif content_length > MindmupParser.CLAUDE_MAX_CONTENT_LENGTH:
+            result["content_type"] = "structured"
+            result["structured_content"] = MindmupParser.extract_mindmap_structure(mindmup)
+
+        # Small content (< 800KB): return full content
         else:
-            # For small content (<800KB), return full content
-            return {
-                "title": mindmup.title,
-                "id": mindmup.id,
-                "format_version": mindmup.format_version,
-                "node_count": mindmup.get_node_count(),
-                "root_node": mindmup.root_node.to_dict(),
-                "all_text_content": all_text,
-                "content_type": "full",
-                "original_content_length": original_content_length,
-                "metadata": {
-                    "created_time": mindmup.created_time.isoformat() if mindmup.created_time else None,
-                    "modified_time": mindmup.modified_time.isoformat() if mindmup.modified_time else None,
-                    "author": mindmup.author
-                }
-            }
+            result["content_type"] = "full"
+            result["root_node"] = mindmup.root_node.to_dict()
+            result["all_text_content"] = all_text
+
+        return result
 
     async def gdrive_tool_list_file(
             self, max_result: int = 1000, file_type: Optional[str] = None,
@@ -182,7 +157,7 @@ class MCPServer:
             query = SearchQuery(
                 max_result=max_result,
                 mime_type=[file_type] if file_type else [],
-                query=name_contain
+                name_contain=name_contain
             )
             result = await gdrive_feature.list_file(query=query)
 
@@ -309,12 +284,16 @@ class MCPServer:
             if error:
                 return error
 
-            # Extract comprehensive summary
+            # Extract structure
             structured_data = MindmupParser.extract_mindmap_structure(mindmup)
-            test_case = structured_data.get('test_cases', [])
 
-            # Create focused summary
-            summary = {
+            # Build summary
+            main_sections = []
+            hierarchy = structured_data.get('hierarchy', {})
+            if 'children' in hierarchy:
+                main_sections = [s.get('title', '') for s in hierarchy['children'][:5]]
+
+            return {
                 "file_info": {
                     "file_id": file_id,
                     "file_name": file_metadata.get('name', 'Unknown'),
@@ -322,37 +301,15 @@ class MCPServer:
                     "title": mindmup.title
                 },
                 "overview": structured_data.get('overview'),
-                "main_section": [],
-                "test_case_summary": [],
-                "total_node": mindmup.get_node_count()
+                "main_sections": main_sections,
+                "total_nodes": mindmup.get_node_count()
             }
-
-            # Extract main section
-            if 'hierarchy' in structured_data:
-                hierarchy = structured_data['hierarchy']
-                if 'children' in hierarchy:
-                    for section in hierarchy['children'][:5]:  # Top 5 main section
-                        summary['main_section'].append(section.get('title', ''))
-
-            # Format test case for summary
-            for i, case in enumerate(test_case[:10], 1):  # Top 10 test case
-                case_summary = {
-                    "index": i,
-                    "title": case.get('title', ''),
-                    "type": case.get('type', 'unknown')
-                }
-                if case.get('sub_items'):
-                    case_summary['detail'] = case['sub_items'][:3]  # First 3 sub-item
-                summary['test_case_summary'].append(case_summary)
-
-            return summary
 
         except ValueError as e:
             return {"error": str(e)}
         except Exception as e:
-            error_message = f'analyze_mindmup_summary_tool error: {e}'
-            logger.error(error_message)
-            return {"error": error_message}
+            logger.error(f'analyze_mindmup_summary_tool error: {e}')
+            return {"error": str(e)}
 
     async def get_mindmup_chunk_tool(
             self, file_id: str, chunk_index: int = 0, search_keyword: Optional[str] = None) -> Dict[str, Any]:
