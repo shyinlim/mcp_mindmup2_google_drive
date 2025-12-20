@@ -239,21 +239,38 @@ class MCPServer:
             if file_size > 0:
                 mindmap_data["file_size_mb"] = round(file_size / (1024 * 1024), 2)
 
-            # If content is chunked, provide guidance
+            # If content is chunked, return partial status to guide AI to continue reading
             if mindmap_data.get("content_type") == "chunked":
+                total_chunks = mindmap_data.get('total_chunk', 1)
                 return {
-                    "mindmap": mindmap_data,
+                    "status": "partial",
+                    "message": f"File too large for single response. This is the structure overview. Use next_action to read full content.",
+                    "current_chunk": 0,
+                    "total_chunks": total_chunks,
                     "file_id": file_id,
-                    "usage_guide": {
-                        "message": f"Content is split into {mindmap_data['total_chunk']} chunk due to size.",
-                        "next_step": "Use get_mindmup_chunk_tool to retrieve specific chunk",
-                        "example": f"get_mindmup_chunk_tool(file_id='{file_id}', chunk_index=0)"
-                    }
+                    "file_size_mb": mindmap_data.get("file_size_mb"),
+                    "node_count": mindmap_data.get("node_count"),
+                    "content": mindmap_data.get("structured_overview"),
+                    "next_action": f"Call get_mindmup_chunk_tool(file_id='{file_id}', chunk_index=0) to get chunk 1/{total_chunks}"
                 }
 
+            # If content is structured (medium size), also return partial with guidance
+            if mindmap_data.get("content_type") == "structured":
+                return {
+                    "status": "partial",
+                    "message": "File is medium size. Returning structured summary. Use next_action to read full content.",
+                    "file_id": file_id,
+                    "file_size_mb": mindmap_data.get("file_size_mb"),
+                    "node_count": mindmap_data.get("node_count"),
+                    "content": mindmap_data.get("structured_content"),
+                    "next_action": f"Call get_mindmup_chunk_tool(file_id='{file_id}', chunk_index=0) to get full content"
+                }
+
+            # Content is complete (small file)
             return {
-                "mindmap": mindmap_data,
-                "file_id": file_id
+                "status": "complete",
+                "file_id": file_id,
+                "mindmap": mindmap_data
             }
 
         except ValueError as e:
@@ -375,8 +392,10 @@ class MCPServer:
                     "result": search_result
                 }
 
-            # If chunk_index is -1, only return search results
+            # If chunk_index is -1, only return search results (search-only mode)
             if chunk_index == -1:
+                result["status"] = "complete"
+                result["message"] = "Search-only mode. Use chunk_index >= 0 to retrieve content."
                 return result
 
             # Extract text content for chunking
@@ -392,16 +411,24 @@ class MCPServer:
                 }
 
             target_chunk = chunk_list[chunk_index]
+            total_chunks = target_chunk["total_chunk"]
+            is_last_chunk = chunk_index >= total_chunks - 1
 
+            result["current_chunk"] = chunk_index
+            result["total_chunks"] = total_chunks
+            result["status"] = "complete" if is_last_chunk else "partial"
             result["chunk_info"] = {
-                "current_chunk": chunk_index,
-                "total_chunk": target_chunk["total_chunk"],
                 "content_length": len(target_chunk["content"]),
                 "start_position": target_chunk["start_pos"],
                 "end_position": target_chunk["end_pos"]
             }
             result["content"] = target_chunk["content"]
             result["mindmap_info"]["total_length"] = len(all_text)
+
+            # Guide AI to continue reading if not complete
+            if not is_last_chunk:
+                next_index = chunk_index + 1
+                result["next_action"] = f"Call get_mindmup_chunk_tool(file_id='{file_id}', chunk_index={next_index}) to get chunk {next_index + 1}/{total_chunks}"
 
             return result
 
