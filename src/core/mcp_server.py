@@ -292,8 +292,14 @@ class MCPServer:
             all_text = ' '.join(all_text_list) if all_text_list else ''
             content_length = len(all_text)
 
-            # Get ALL node titles (no limit) for complete overview
-            all_titles = MindmupParser.get_all_node_title(mindmup.root_node, max_title=5000)
+            # Get node titles with reasonable limits for overview
+            # Limited to 100 titles, 80 chars each, depth 4 to keep response size manageable
+            all_titles = MindmupParser.get_all_node_title(
+                mindmup.root_node,
+                max_title=100,
+                max_title_length=80,
+                max_depth=4
+            )
 
             # Extract structure
             structured_data = MindmupParser.extract_mindmap_structure(mindmup)

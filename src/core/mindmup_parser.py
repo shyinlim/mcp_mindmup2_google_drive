@@ -79,7 +79,7 @@ class MindmupParser:
                 },
                 "hierarchy": MindmupParser.extract_node_hierarchy(mindmap.root_node, max_depth=10, max_children_per_level=10),
                 "key_sections": MindmupParser.extract_key_section(mindmap.root_node),
-                "all_titles": MindmupParser.get_all_node_title(mindmap.root_node, max_title=500)
+                "all_titles": MindmupParser.get_all_node_title(mindmap.root_node)
             }
         except Exception as e:
             logger.error(f'Error extracting mindmap structure: {e}')
@@ -147,18 +147,41 @@ class MindmupParser:
         return key_section
 
     @staticmethod
-    def get_all_node_title(node: MindmupNode, max_title: int = 2000) -> List[str]:
-        """Get all node title up to a maximum limit."""
+    def get_all_node_title(
+            node: MindmupNode,
+            max_title: int = 100,
+            max_title_length: int = 80,
+            max_depth: int = 4
+    ) -> List[str]:
+        """Get all node title up to a maximum limit.
+
+        Args:
+            node: Root node to start from
+            max_title: Maximum number of titles to collect
+            max_title_length: Maximum length of each title (truncate if longer)
+            max_depth: Maximum depth to traverse (0 = root only)
+        """
         title_list = []
 
-        def collect_title(current_node):
+        def collect_title(current_node, current_depth: int = 0):
             if len(title_list) >= max_title:
                 return
-            title_list.append(current_node.title)
+            if current_depth > max_depth:
+                return
+
+            # Truncate long titles
+            title = current_node.title.strip()
+            if len(title) > max_title_length:
+                title = title[:max_title_length] + "..."
+
+            # Skip empty or whitespace-only titles
+            if title and title != "...":
+                title_list.append(title)
+
             for child in current_node.children:
                 if len(title_list) >= max_title:
                     break
-                collect_title(child)
+                collect_title(child, current_depth + 1)
 
         collect_title(node)
         return title_list
