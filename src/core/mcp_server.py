@@ -433,102 +433,11 @@ class MCPServer:
             logger.error(error_message)
             return {"error": error_message}
 
-    async def get_multiple_mindmup_tool(
-            self, folder_id: Optional[str] = None, name_contain: Optional[str] = None,
-            max_result: int = 10) -> Dict[str, Any]:
-        """Get multiple mindmup content - Using search and parse.
-
-        Args:
-            folder_id: Specific folder to search in. If None, searches globally.
-            name_contain: Filter by file name containing this text.
-            max_result: Maximum number of files to process (default: 10).
-        """
-        try:
-            gdrive_feature = await self._get_gdrive_feature_from_header()
-
-            # Searching all mindmup files using gdrive_feature
-            mindmup_file = await gdrive_feature.search_mindmup_file(
-                folder_id=folder_id,
-                name_contain=name_contain
-            )
-
-            result_data = []
-
-            # Limit the number of file to process
-            file_to_process = mindmup_file[:max_result]
-
-            logger.info(
-                f'Found {len(mindmup_file)} MindMup file, processing first {len(file_to_process)}')
-
-            # Loading and parsing mindmup one by one
-            for file_info in file_to_process:
-                try:
-                    # Check file size before processing
-                    if hasattr(file_info, 'size') and file_info.size:
-                        file_size = int(file_info.size)
-                        if not gdrive_feature.check_file_size(file_size, file_info.name):
-                            # Skip large files and add a summary entry
-                            result_data.append({
-                                "file_id": file_info.id,
-                                "file_name": file_info.name,
-                                "file_url": file_info.web_view_link,
-                                "last_modified": file_info.modified_time.isoformat() if file_info.modified_time else None,
-                                "error": f"File too large ({file_size} bytes), skipped",
-                                "file_size_bytes": file_size
-                            })
-                            continue
-
-                    # Download the file from GDrive
-                    download_result_frm_gdrive = await gdrive_feature.download_file_content(file_id=file_info.id)
-
-                    if download_result_frm_gdrive.is_success:
-                        file_content = download_result_frm_gdrive.detail.get('content_str')
-                        if file_content:
-                            try:
-                                mindmap_data = await self._process_mindmup_content(file_info.id, file_content)
-                                if "error" not in mindmap_data:
-                                    # Add preview for multiple files
-                                    if "all_text_content" in mindmap_data:
-                                        mindmap_data["preview"] = MindmupParser.create_content_summary(
-                                            mindmap_data["all_text_content"], max_length=500
-                                        )
-                                    result_data.append({
-                                        "file_id": file_info.id,
-                                        "file_name": file_info.name,
-                                        "file_url": file_info.web_view_link,
-                                        "last_modified": file_info.modified_time.isoformat() if file_info.modified_time else None,
-                                        "mindmap": mindmap_data
-                                    })
-                                else:
-                                    logger.error(f'get_multiple_mindmup_tool: {mindmap_data["error"]}')
-                            except Exception as parse_error:
-                                logger.error(
-                                    f'get_multiple_mindmup_tool parse error: {file_info.id}, {parse_error}')
-
-                except Exception as file_error:
-                    logger.error(
-                        f'get_multiple_mindmup_tool file error: {file_info.id}, {file_error}')
-
-            logger.info(
-                f'get_multiple_mindmup_tool: processed {len(result_data)} files')
-            return {
-                "result": result_data,
-                "count": len(result_data)
-            }
-
-        except ValueError as e:
-            return {"error": str(e)}
-        except Exception as e:
-            error_message = f'get_multiple_mindmup_tool error: {e}'
-            logger.error(error_message)
-            return {"error": error_message}
-
     def _setup_tool(self):
         self.mcp.tool()(self.gdrive_tool_list_file)
         self.mcp.tool()(self.get_single_mindmup_tool)
         self.mcp.tool()(self.analyze_mindmup_summary_tool)
         self.mcp.tool()(self.get_mindmup_chunk_tool)
-        self.mcp.tool()(self.get_multiple_mindmup_tool)
 
     def _setup_sse_route(self):
         @self.mcp.custom_route(path='/ping', methods=['GET'])

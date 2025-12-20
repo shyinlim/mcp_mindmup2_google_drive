@@ -55,11 +55,10 @@ class GoogleDriveFeature:
             logger.error(error_message)
             return OperationResult.fail(detail=error_message)
 
-    async def search_mindmup_file(self, folder_id: Optional[str] = None, name_contain: Optional[str] = None) -> List:
+    async def search_mindmup_file(self, name_contain: Optional[str] = None) -> List:
         """Search for MindMup files in Google Drive.
 
         Args:
-            folder_id: Optional folder to search in.
             name_contain: Optional filename filter.
 
         Returns:
@@ -78,7 +77,6 @@ class GoogleDriveFeature:
             for pattern in patterns:
                 query = SearchQuery(
                     max_result=1000,
-                    folder_id=folder_id,
                     name_contain=pattern,
                     include_trashed=False
                 )
