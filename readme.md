@@ -59,7 +59,7 @@ A Model Context Protocol (MCP) server that provides seamless integration between
 |------|-------------|-------|
 | 1 | Go to [Google Cloud Console](https://console.cloud.google.com/) and create a new project or select an existing one | |
 | 2 | Enable [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com) in your project | |
-| 3 | Create Service Account credentials:<br>- Go to "IAM & Admin" → "Service Accounts"<br>- Click "Create Service Account"<br>- Download the JSON key file | |
+| 3 | Create Service Account credentials:<br>- Go to "IAM & Admin" → "Service Accounts"<br>- Click "Create Service Account"<br>- Download the JSON key file | ![google_drive_share_list.jpg](readme/google_drive_share_list.jpg)|
 | 4 | Extract the service account email from JSON and encode to base64:<br>- Find `"client_email"` in the JSON file<br>- See [Generate Base64 Credential](#generate-base64-credential) section for encoding | |
 | 5 | Share your Google Drive folder with the Service Account:<br>- Right-click folder → Share<br>- Paste the service account email<br>- Grant **Viewer** access<br>- Do **NOT** send invitation | ![google_drive_share_list.jpg](readme/google_drive_share_list.jpg) |
 
