@@ -8,11 +8,20 @@ A Model Context Protocol (MCP) server that provides seamless integration between
 
 ## ✨ Feature
 
-- **Search MindMup Files**: Find MindMup files across your entire Google Drive or within specific folders (Currently supports read-only operations for MindMup files.)
+- **Search MindMup Files**: Find MindMup files across your entire Google Drive (read-only)
 - **Google Drive Integration**: List and filter files in Google Drive with various criteria
 - **MindMup Parsing**: Parse and extract content from MindMup mind map files
 - **FastMCP Server**: Built on FastMCP framework for high performance
 - **Docker Support**: Containerized deployment with Docker Compose
+
+## 🔧 Available MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `gdrive_tool_list_file` | List files from Google Drive with optional filtering by file type or name |
+| `get_single_mindmup_tool` | Get a single MindMup file by ID or name |
+| `analyze_mindmup_summary_tool` | Get summary overview of a MindMup file (sections, node count, structure) |
+| `get_mindmup_chunk_tool` | Get specific chunk of a large MindMup file with optional keyword search |
 
 ## 🧠 Business Value
 
@@ -59,8 +68,8 @@ A Model Context Protocol (MCP) server that provides seamless integration between
 |------|-------------|-------|
 | 1 | Go to [Google Cloud Console](https://console.cloud.google.com/) and create a new project or select an existing one | |
 | 2 | Enable [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com) in your project | |
-| 3 | Create Service Account credentials:<br>- Go to "IAM & Admin" → "Service Accounts"<br>- Click "Create Service Account"<br>- Download the JSON key file | ![google_drive_share_list.jpg](readme/google_drive_share_list.jpg)|
-| 4 | Extract the service account email from JSON and encode to base64:<br>- Find `"client_email"` in the JSON file<br>- See [Generate Base64 Credential](#generate-base64-credential) section for encoding | |
+| 3 | Create Service Account credentials:<br>- Go to "IAM & Admin" → "Service Accounts"<br>- Click "Create Service Account"<br>- Download the JSON key file | ![google_service_acc.jpg](readme/google_service_acc.jpg)|
+| 4 | Encode the entire JSON key file to base64:<br>- See [Generate Base64 Credential](#generate-base64-credential) section | |
 | 5 | Share your Google Drive folder with the Service Account:<br>- Right-click folder → Share<br>- Paste the service account email<br>- Grant **Viewer** access<br>- Do **NOT** send invitation | ![google_drive_share_list.jpg](readme/google_drive_share_list.jpg) |
 
 ### Run the Server
