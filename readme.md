@@ -61,7 +61,12 @@ A Model Context Protocol (MCP) server that provides seamless integration between
    - Go to "IAM & Admin" → "Service Accounts"
    - Click "Create Service Account"
    - Download the JSON key file
-5. Encode the JSON file to base64 (see [Generate Base64 Credential](#generate-base64-credential))
+5. Share Google Drive folder/file with Service Account:
+   - Open the JSON key file and find the `"client_email"` field
+   - Go to your Google Drive folder → Right-click → Share
+   - Paste the service account email and grant **Viewer** access
+   - Do **NOT** send invitation email (just share without notifying)
+6. Encode the JSON file to base64 (see [Generate Base64 Credential](#generate-base64-credential))
 
 ### Run the Server
 For development:
