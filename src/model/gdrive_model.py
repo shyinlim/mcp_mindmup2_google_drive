@@ -10,7 +10,6 @@ class SearchQuery:
     """Google Drive search query parameters."""
 
     name_contain: Optional[str] = None
-    folder_id: Optional[str] = None
     mime_type: List[str] = field(default_factory=list)
     max_result: int = 1000
     include_trashed: bool = False
@@ -21,9 +20,6 @@ class SearchQuery:
 
         if not self.include_trashed:
             conditions.append('trashed=false')
-
-        if self.folder_id:
-            conditions.append(f'"{self.folder_id}" in parents')
 
         if self.name_contain:
             conditions.append(f'name contains "{self.name_contain}"')

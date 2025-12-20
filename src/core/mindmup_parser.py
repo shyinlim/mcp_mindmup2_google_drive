@@ -242,32 +242,6 @@ class MindmupParser:
         return chunk_list
 
     @staticmethod
-    def create_content_summary(content: str, max_length: int = 1000) -> str:
-        """Create a summary of the content focusing on key information."""
-        if len(content) <= max_length:
-            return content
-
-        # Split by common delimiter and prioritize important content
-        sentence_list = content.replace('\n', ' ').split('. ')
-        summary_part = []
-        current_length = 0
-
-        # Add first few sentence
-        for i, sentence in enumerate(sentence_list[:10]):  # Only first 10 sentence
-            sentence = sentence.strip()
-            if sentence and current_length + len(sentence) < max_length:
-                summary_part.append(sentence)
-                current_length += len(sentence) + 2  # +2 for '. '
-            else:
-                break
-
-        summary = '. '.join(summary_part)
-        if len(summary) < len(content):
-            summary += f"... [Content truncated. Original length: {len(content)} chars]"
-
-        return summary
-
-    @staticmethod
     def get_chunk_previews(content: str, chunk_size: int = None) -> List[Dict[str, Any]]:
         """Generate previews for each chunk showing what content it contains.
 

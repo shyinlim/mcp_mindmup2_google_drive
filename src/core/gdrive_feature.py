@@ -6,14 +6,11 @@ from src.model.gdrive_model import SearchQuery, create_file_info
 from src.utility.logger import get_logger
 
 from src.core.gdrive_client import GoogleDriveClient
-from src.utility.enum import MimeType
 
 logger = get_logger(__name__)
 
 
 class GoogleDriveFeature:
-
-    MAX_FILE_SIZE_BYTES = 100000000  # 100MB - With chunking support
 
     def __init__(self, client: GoogleDriveClient):
         self.client = client
@@ -183,14 +180,6 @@ class GoogleDriveFeature:
             error_message = f'download_file_content error: {file_id}, {e}'
             logger.error(error_message)
             return OperationResult.fail(error_message)
-
-    def check_file_size(self, file_size_bytes: int, file_name: str) -> bool:
-        """Check if file size is within acceptable limits."""
-        if file_size_bytes > self.MAX_FILE_SIZE_BYTES:
-            logger.warning(
-                f'Skipping large file {file_name}: {file_size_bytes} bytes > {self.MAX_FILE_SIZE_BYTES} bytes limit')
-            return False
-        return True
 
     def _cleanup_cache(self):
         """Remove expired cache entries and enforce max cache size."""
