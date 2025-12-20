@@ -1,8 +1,8 @@
 import asyncio
+import base64
 import functools
-import os
+import json
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -46,54 +46,41 @@ class GoogleDriveClient:
         except Exception as e:
             raise Exception(f'GDrive _test_auth_connection error: {e}') from e
 
-    async def authenticate(self) -> OperationResult:
+    async def authenticate_from_base64(self, credential_base64: str) -> OperationResult:
+        """Authenticate using base64 encoded service account JSON.
+
+        Args:
+            credential_base64: Base64 encoded service account JSON string.
+
+        Returns:
+            OperationResult indicating success or failure.
+        """
         try:
+            # Decode base64 to JSON string
+            credential_bytes = base64.b64decode(credential_base64)
+            credential_json = credential_bytes.decode('utf-8')
+            credential_dict = json.loads(credential_json)
 
-            # region Get credential file
-            logger.info('Authenticate with Google Drive')
-            cred_file = os.getenv('GOOGLE_DRIVE_CREDENTIAL_FILE')
-
-            if not cred_file:
-                # If code cannot extract credential then try to extract from
-                # default location
-                default_path = [
-                    'deployment/credentials/google_service_account.json',
-                    'credentials/google_service_account.json',
-                    'google_service_account.json'
-                ]
-
-                for path in default_path:
-                    if Path(path).exists():
-                        cred_file = path
-                        logger.info(
-                            f'Using credential from default location: {cred_file}')
-                        break
-
-            if not cred_file or not Path(cred_file).exists():
-                return OperationResult.fail(
-                    detail=f'Credential file not found: {cred_file}.')
-            # endregion Get credential file
-
-            # region Google console item's permission
-            scope = [
-                'https://www.googleapis.com/auth/drive',  # Overall GDrive accesss
-                'https://www.googleapis.com/auth/drive.file'  # File access
+            # Define scopes
+            scopes = [
+                'https://www.googleapis.com/auth/drive',
+                'https://www.googleapis.com/auth/drive.file'
             ]
 
-            self.credential = service_account.Credentials.from_service_account_file(
-                filename=cred_file,
-                scopes=scope
+            # Build credential from dict (not file)
+            self.credential = service_account.Credentials.from_service_account_info(
+                credential_dict,
+                scopes=scopes
             )
 
-            # Build GDrive
+            # Build GDrive service
             self.service = build('drive', 'v3', credentials=self.credential)
 
             # Check connection
             await self._test_auth_connection()
-            return OperationResult.success(detail='Authenticate success.')
-            # endregion Google console item's permission
+            return OperationResult.success(detail='Authenticate from base64 success.')
 
         except Exception as e:
-            error_message = f'GDrive authenticate error: {e}'
+            error_message = f'GDrive authenticate_from_base64 error: {e}'
             logger.error(error_message)
             return OperationResult.fail(detail=error_message)

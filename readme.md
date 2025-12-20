@@ -26,8 +26,6 @@ A Model Context Protocol (MCP) server that provides seamless integration between
 
 ```
 ├── deployment/
-│   ├── credential/
-│   │   └── google_service_account.json # Google Cloud Service Account credentials
 │   ├── docker-compose-dev.yml
 │   ├── docker-compose-prod.yml
 │   └── Dockerfile
@@ -63,7 +61,7 @@ A Model Context Protocol (MCP) server that provides seamless integration between
    - Go to "IAM & Admin" → "Service Accounts"
    - Click "Create Service Account"
    - Download the JSON key file
-5. Place the JSON file at: `deployment/credential/google_service_account.json`
+5. Encode the JSON file to base64 (see [Generate Base64 Credential](#generate-base64-credential))
 
 ### Run the Server
 For development:
@@ -80,14 +78,29 @@ Add this server to your MCP client configuration:
 
 ```json
 {
-  "mcpServers": {
-    "mindmup-gdrive": {
-      "command": "mcp-remote",
-      "args": ["http://localhost:9802/sse"]
+    "mcpServers": {
+      "mindmup-gdrive": {
+        "url": "http://your-server:9802/sse",
+        "headers": {
+          "X-Google-Credential": "<your-base64-encoded-credential>"
+        }
+      }
     }
   }
-}
 ```
+
+#### Generate Base64 Credential
+Encode your Google service account JSON to base64:
+
+```bash
+# macOS / Linux
+cat your_service_account.json | base64 | tr -d '\n'
+
+# Windows PowerShell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("your_service_account.json"))
+```
+
+Copy the output and paste it as the `X-Google-Credential` value.
 
 ## 🔍 Future Plan
 - **Create MindMup Files**: Create new mind maps directly through MCP interface

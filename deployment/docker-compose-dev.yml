@@ -8,11 +8,11 @@ services:
       dockerfile: deployment/Dockerfile
     container_name: mcp_mindmup_container
     environment:
-      - GOOGLE_DRIVE_CREDENTIAL_FILE=/app/deployment/credential/google_service_account.json
       - MCP_TRANSPORT=sse
     ports:
       - '9802:9802'
     volumes:
       - ..:/app
-      - ./credential:/app/deployment/credential
     command: ['python3','run.py']
+    # Note: Google Drive credential is now provided per-request via X-Google-Credential header.
+    # Each user sets their base64 encoded service account JSON in mcp.json headers.
