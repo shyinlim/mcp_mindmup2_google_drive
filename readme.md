@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/taurus5650-mcp-mindmup2-google-drive-badge.png)](https://mseep.ai/app/taurus5650-mcp-mindmup2-google-drive)
+
 # MindMup2 Google Drive MCP Server
 
 A Model Context Protocol (MCP) server that provides seamless integration between MindMup mind maps and Google Drive. This server enables you to search, retrieve, and parse MindMup files stored in your Google Drive directly through the MCP interface.
