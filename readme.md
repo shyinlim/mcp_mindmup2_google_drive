@@ -87,29 +87,39 @@ Add this server to your MCP client configuration:
 
 ```json
 {
-    "mcpServers": {
-      "mindmup-gdrive": {
-        "url": "http://your-server:9802/sse",
-        "headers": {
-          "X-Google-Credential": "<your-base64-encoded-credential>"
-        }
+   "mcpServers":{
+      "mindmup-gdrive":{
+         "type":"http",
+         "url":"http://<your-domain>:9802/mcp",
+         "headers":{
+            "X-Google-Credential":"BASE64_GOOGLE_SERVICE_ACCOUNT"
+         }
       }
-    }
-  }
+   }
+}
 ```
 
 #### Generate Base64 Credential
-Encode your Google service account JSON to base64:
+Encode your Google service account JSON to base64: <br>
+https://www.base64encode.org/ <br>
+Copy the output and paste it as the `X-Google-Credential` value. <br>
 
-```bash
-# macOS / Linux
-cat your_service_account.json | base64 | tr -d '\n'
-
-# Windows PowerShell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("your_service_account.json"))
+Example
+```json
+{
+   "mcpServers":{
+      "mindmup-gdrive":{
+         "type":"http",
+         "url":"http://<your-domain>:9802/mcp",
+         "headers":{
+            "X-Google-Credential":"ewogICJ0eXBlIjogInN"
+         }
+      }
+   }
+}
 ```
 
-Copy the output and paste it as the `X-Google-Credential` value.
+
 
 ## 🔍 Future Plan
 - **Create MindMup Files**: Create new mind maps directly through MCP interface
