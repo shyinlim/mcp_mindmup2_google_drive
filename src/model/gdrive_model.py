@@ -22,7 +22,8 @@ class SearchQuery:
             conditions.append('trashed=false')
 
         if self.name_contain:
-            conditions.append(f'name contains "{self.name_contain}"')
+            safe_name = self.name_contain.replace('"', '\\"')
+            conditions.append(f'name contains "{safe_name}"')
 
         if self.mime_type:
             mime_conditions = [

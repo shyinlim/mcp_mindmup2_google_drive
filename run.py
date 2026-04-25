@@ -1,25 +1,30 @@
 import os
 import sys
 
-from src.utility.logger import get_logger
-
 from src.core.mcp_server import MCPServer
+from src.utility.logger import get_logger
 
 logger = get_logger(__name__)
 
 
+# Module-level instances. Two reasons to construct them here (not inside main):
+# 1. `fastmcp run run.py:mcp --reload` (used by docker-compose-dev) imports this
+#    module and looks up `mcp` to start the server.
+# 2. `python3 run.py` (used by prod) goes through main() below.
+mcp_server = MCPServer(
+    name='TestCase MCP Server',
+    host='0.0.0.0',
+    port=9805,
+)
+mcp = mcp_server.mcp  # FastMCP instance for `fastmcp run` CLI
+
+
 def main():
-    """Starting the server.
+    """Starting the server (used by `python3 run.py`, e.g. prod).
 
     Google Drive credential is now provided per-request via X-Google-Credential header.
     Each user sets their own base64 encoded service account JSON in mcp.json headers.
     """
-    mcp_server = MCPServer(
-        name='Mindmup2 GDrive MCP Sever',
-        host='0.0.0.0',
-        port=9802
-    )
-
     try:
         # MCP Client mode | stdio, sse, streamable-http
         transport = os.getenv('MCP_TRANSPORT', 'sse')

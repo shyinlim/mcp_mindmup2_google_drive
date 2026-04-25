@@ -1,8 +1,8 @@
 FLASK_APP_PY := run.py
-DEPLOYMENT_PATH := ./deployment/
+DEPLOYMENT_PATH := ./mcp_deployment/
 DOCKER_COMPOSE_FILE := $(DEPLOYMENT_PATH)docker-compose-prod.yml
 DOCKER_COMPOSE_FILE_DEV := $(DEPLOYMENT_PATH)docker-compose-dev.yml
-DOCKER_SERVICE_NAME := mcp_mindmup_service
+DOCKER_SERVICE_NAME := mcp_testcase_service
 DOCKER_IMAGE_TAG := $(DOCKER_SERVICE_NAME):latest
 
 .DEFAULT_GOAL := help

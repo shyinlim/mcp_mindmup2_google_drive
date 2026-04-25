@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  mcp_testcase:
+    image: mcp_testcase:latest
+    build:
+      context: ..
+      dockerfile: mcp_deployment/Dockerfile
+    restart: unless-stopped
+    container_name: mcp_testcase_container
+    environment:
+      - MCP_TRANSPORT=streamable-http
+    ports:
+      - '9805:9805'
+    volumes:
+      - ..:/app
+    # Dev mode: use fastmcp CLI with --reload so file edits auto-restart the server.
+    # Prod (docker-compose-prod.yml) still uses `python3 run.py` (no reload).
+    command: ['fastmcp','run','run.py:mcp','--reload','--transport','http','--host','0.0.0.0','--port','9805']
+    # Note: Google Drive credential is now provided per-request via X-Google-Credential header.
+    # Each user sets their base64 encoded service account JSON in mcp.json headers.

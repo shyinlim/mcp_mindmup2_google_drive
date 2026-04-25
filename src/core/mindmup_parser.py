@@ -1,5 +1,5 @@
 import json
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from src.model.mindmup_model import MindmupNode, Mindmup
 from src.utility.logger import get_logger
@@ -8,9 +8,6 @@ logger = get_logger(__name__)
 
 
 class MindmupParser:
-
-    CLAUDE_MAX_CONTENT_LENGTH = 800000  # 800KB - Per chunk limit
-    CHUNK_OVERLAP = 1000  # 1KB overlap between chunks for context
 
     @staticmethod
     def _parse_node(node_data: Dict[str, Any]) -> MindmupNode:
@@ -66,272 +63,154 @@ class MindmupParser:
             raise ValueError(error_message)
 
     @staticmethod
-    def extract_mindmap_structure(mindmap: Mindmup) -> Dict[str, Any]:
-        """Extract structured information from mindmaps."""
-        try:
-            return {
-                "overview": {
-                    "title": mindmap.title,
-                    "total_nodes": mindmap.get_node_count(),
-                    "max_depth": mindmap.get_max_depth(),
-                    "created": mindmap.created_time.isoformat() if mindmap.created_time else None,
-                    "modified": mindmap.modified_time.isoformat() if mindmap.modified_time else None
-                },
-                "hierarchy": MindmupParser.extract_node_hierarchy(mindmap.root_node, max_depth=10, max_children_per_level=10),
-                "key_sections": MindmupParser.extract_key_section(mindmap.root_node),
-                "all_titles": MindmupParser.get_all_node_title(mindmap.root_node)
-            }
-        except Exception as e:
-            logger.error(f'Error extracting mindmap structure: {e}')
-            return {"error": f"Failed to extract structure: {e}"}
+    def render_tree_outline(
+            node: MindmupNode,
+            max_depth: int = 99,
+            max_title_length: int = 80,
+            max_children: int = 30,
+            max_lines: int = 2000,
+            path_prefix: str = "1",
+    ) -> str:
+        """Render full tree as indented text with node paths for navigation.
+
+        Args:
+            node: Root node to render.
+            max_depth: Max depth to expand (deeper nodes shown as collapsed).
+            max_title_length: Max chars per title line (truncated if longer).
+            max_children: Max children per node to show before truncating.
+            max_lines: Max total lines to render before truncating.
+            path_prefix: Starting path label for the root of this render
+                (e.g. "1" for whole tree, "1.2.3" when rendering a subtree
+                at that path so children continue numbering correctly).
+        """
+        lines = []
+
+        def _render(current: MindmupNode, prefix: str, indent: int) -> None:
+            if len(lines) >= max_lines:
+                return
+
+            title_line = current.to_outline_line(max_title_length)
+
+            # Skip empty-title nodes (visual dividers in MindMup) but still recurse into children
+            if title_line.strip():
+                if indent >= max_depth and current.children:
+                    title_line += f" ({len(current.children)} children, collapsed)"
+                lines.append(f"[{prefix}] {title_line}")
+
+            if indent < max_depth:
+                children_to_show = current.children[:max_children]
+                for i, child in enumerate(children_to_show, start=1):
+                    if len(lines) >= max_lines:
+                        lines.append(f"[...] (output truncated at {max_lines} lines)")
+                        return
+                    _render(child, f"{prefix}.{i}", indent + 1)
+
+                remaining = len(current.children) - len(children_to_show)
+                if remaining > 0:
+                    lines.append(f"[...] ... and {remaining} more")
+
+        _render(node, path_prefix, 0)
+        return "\n".join(lines)
 
     @staticmethod
-    def extract_node_hierarchy(node: MindmupNode, max_depth: int = 3, max_children_per_level: int = 10,
-                               current_depth: int = 0) -> Dict[str, Any]:
-        """Extract hierarchical structure with depth limits."""
-        if current_depth >= max_depth:
-            return {
-                "title": node.title,
-                "children_count": len(node.children),
-                "has_more": len(node.children) > 0
-            }
+    def find_node_by_path(root: MindmupNode, path: str) -> Optional[MindmupNode]:
+        """Find node by path string, e.g. '1.2.3'.
 
-        children = []
-        for i, child in enumerate(node.children[:max_children_per_level]):
-            children.append(MindmupParser.extract_node_hierarchy(
-                node=child,
-                max_depth=max_depth,
-                max_children_per_level=max_children_per_level,
-                current_depth=current_depth + 1
-            ))
+        Path must start with '1' (root). Returns None for invalid paths.
+        """
+        if not path or not path.strip():
+            return None
 
-        result = {
-            "title": node.title,
-            "children": children
+        parts = path.strip().split(".")
+        if not parts or parts[0] != "1":
+            return None
+
+        current = root
+        for part in parts[1:]:
+            try:
+                idx = int(part) - 1  # path is 1-based
+            except ValueError:
+                return None
+            if idx < 0 or idx >= len(current.children):
+                return None
+            current = current.children[idx]
+
+        return current
+
+    @staticmethod
+    def get_node_breadcrumb(root: MindmupNode, path: str) -> List[str]:
+        """Get ancestor titles as context breadcrumb.
+
+        Returns partial breadcrumb if path is partially valid.
+        Empty/whitespace titles are filtered out (e.g. visual divider nodes).
+        """
+        if not path or not path.strip():
+            return []
+
+        parts = path.strip().split(".")
+        if not parts or parts[0] != "1":
+            return []
+
+        titles = [root.to_outline_line()]
+        current = root
+        for part in parts[1:]:
+            try:
+                idx = int(part) - 1
+            except ValueError:
+                break
+            if idx < 0 or idx >= len(current.children):
+                break
+            current = current.children[idx]
+            titles.append(current.to_outline_line())
+
+        return [t for t in titles if t.strip()]
+
+    @staticmethod
+    def get_section_stats(root: MindmupNode, path_prefix: str = "1") -> List[Dict[str, Any]]:
+        """Stats for each top-level section.
+
+        Returns list of dicts with keys:
+        - path: node path like "1.2" for drill-down with get_mindmap_section
+        - title: truncated title preview
+        - node_count: total descendants + self
+        - depth: max tree depth from this node
+        - text_weight: sum of all title character counts (Python str len, not bytes/tokens).
+                       Use relative comparison between sections to decide drill priority.
+        """
+        stats = []
+        for i, child in enumerate(root.children, start=1):
+            stats.append({
+                "path": f"{path_prefix}.{i}",
+                "title": child.to_outline_line(max_title_length=80),
+                "node_count": 1 + sum(1 for _ in _iter_descendants(child)),
+                "depth": child.get_depth(),
+                "text_weight": child.get_text_weight(),
+            })
+        return stats
+
+    @staticmethod
+    def render_subtree_detail(
+            node: MindmupNode,
+            path_prefix: str = "1",
+            ai_dict: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Detailed subtree for drill-down.
+
+        Args:
+            node: The MindmupNode at path_prefix.
+            path_prefix: The path label (e.g. "1.2.3") matching node's location in the full tree.
+            ai_dict: Optionally pass a pre-computed to_ai_dict() result to avoid recomputing.
+                If None, computes fresh.
+        """
+        return {
+            "path": path_prefix,
+            "node": ai_dict if ai_dict is not None else node.to_ai_dict(),
+            "node_count": 1 + sum(1 for _ in _iter_descendants(node)),
         }
 
-        if len(node.children) > max_children_per_level:
-            result['truncated_children'] = len(node.children) - max_children_per_level
 
-        return result
-
-    @staticmethod
-    def extract_key_section(root_node: MindmupNode) -> List[Dict[str, Any]]:
-        """Extract key section (top-level and second-level nodes) with their immediate children."""
-        key_section = []
-
-        for main_section in root_node.children:
-            section_info = {
-                "title": main_section.title,
-                "subsections": []
-            }
-
-            # Get immediate children (subsections)
-            for subsection in main_section.children[:20]:  # Limit to 20 subsections
-                subsection_info = {
-                    "title": subsection.title,
-                    "child_count": len(subsection.children)
-                }
-
-                # If subsection has children, get a few key ones
-                if subsection.children:
-                    subsection_info["key_items"] = [child.title for child in subsection.children[:5]]
-
-                section_info["subsections"].append(subsection_info)
-
-            if len(main_section.children) > 20:
-                section_info["additional_subsections"] = len(main_section.children) - 20
-
-            key_section.append(section_info)
-
-        return key_section
-
-    @staticmethod
-    def get_all_node_title(
-            node: MindmupNode,
-            max_title: int = 100,
-            max_title_length: int = 80,
-            max_depth: int = 4
-    ) -> List[str]:
-        """Get all node title up to a maximum limit.
-
-        Args:
-            node: Root node to start from
-            max_title: Maximum number of titles to collect
-            max_title_length: Maximum length of each title (truncate if longer)
-            max_depth: Maximum depth to traverse (0 = root only)
-        """
-        title_list = []
-
-        def collect_title(current_node, current_depth: int = 0):
-            if len(title_list) >= max_title:
-                return
-            if current_depth > max_depth:
-                return
-
-            # Truncate long titles
-            title = current_node.title.strip()
-            if len(title) > max_title_length:
-                title = title[:max_title_length] + "..."
-
-            # Skip empty or whitespace-only titles
-            if title and title != "...":
-                title_list.append(title)
-
-            for child in current_node.children:
-                if len(title_list) >= max_title:
-                    break
-                collect_title(child, current_depth + 1)
-
-        collect_title(node)
-        return title_list
-
-    @staticmethod
-    def split_content_to_chunk(content: str, chunk_size: int = None) -> List[Dict[str, Any]]:
-        """Split large content into manageable chunks."""
-        if chunk_size is None:
-            chunk_size = MindmupParser.CLAUDE_MAX_CONTENT_LENGTH
-
-        if len(content) <= chunk_size:
-            return [{
-                "chunk_index": 0,
-                "total_chunk": 1,
-                "content": content,
-                "start_pos": 0,
-                "end_pos": len(content)
-            }]
-
-        chunk_list = []
-        total_length = len(content)
-        overlap = MindmupParser.CHUNK_OVERLAP
-
-        pos = 0
-        chunk_index = 0
-
-        while pos < total_length:
-            # Calculate chunk end position
-            end_pos = min(pos + chunk_size, total_length)
-
-            # Try to find a good break point (sentence or paragraph)
-            if end_pos < total_length:
-                # Look for paragraph break
-                newline_pos = content.rfind('\n', pos + chunk_size - 1000, end_pos)
-                if newline_pos > pos:
-                    end_pos = newline_pos + 1
-                else:
-                    # Look for sentence break
-                    period_pos = content.rfind('. ', pos + chunk_size - 500, end_pos)
-                    if period_pos > pos:
-                        end_pos = period_pos + 2
-
-            chunk_list.append({
-                "chunk_index": chunk_index,
-                "content": content[pos:end_pos],
-                "start_pos": pos,
-                "end_pos": end_pos
-            })
-
-            # Move position with overlap
-            pos = end_pos - overlap if end_pos < total_length else end_pos
-            chunk_index += 1
-
-        # Add total chunk count to each chunk
-        for chunk in chunk_list:
-            chunk["total_chunk"] = len(chunk_list)
-
-        return chunk_list
-
-    @staticmethod
-    def get_chunk_previews(content: str, chunk_size: int = None) -> List[Dict[str, Any]]:
-        """Generate previews for each chunk showing what content it contains.
-
-        Args:
-            content: Full text content to be chunked
-            chunk_size: Size of each chunk (default: CLAUDE_MAX_CONTENT_LENGTH)
-
-        Returns:
-            List of chunk previews with index, start content, and key identifiers
-        """
-        chunk_list = MindmupParser.split_content_to_chunk(content, chunk_size)
-        previews = []
-
-        for chunk in chunk_list:
-            chunk_content = chunk["content"]
-
-            # Get first 200 chars as preview start
-            preview_start = chunk_content[:200].strip()
-            if len(chunk_content) > 200:
-                preview_start += "..."
-
-            # Extract identifiable items from chunk (lines that look like section headers)
-            lines = chunk_content.split('\n')
-            key_items = []
-            for line in lines[:50]:  # Check first 50 lines
-                line = line.strip()
-                # Identify potential section headers (short lines, often titles)
-                if line and 5 < len(line) < 100 and not line.startswith('{') and not line.startswith('[Note]'):
-                    # Skip lines that look like data/code
-                    if not any(c in line for c in ['=', ':', '{', '}', '()', '"']):
-                        if line not in key_items:
-                            key_items.append(line)
-                    # Also capture lines with common patterns like "TestCase:", "Spec", API paths
-                    elif line.startswith('TestCase') or line.startswith('Spec') or '/' in line[:20]:
-                        simplified = line.split('[')[0].strip()[:80]
-                        if simplified and simplified not in key_items:
-                            key_items.append(simplified)
-
-                if len(key_items) >= 5:
-                    break
-
-            previews.append({
-                "chunk_index": chunk["chunk_index"],
-                "total_chunks": chunk["total_chunk"],
-                "char_range": f"{chunk['start_pos']}-{chunk['end_pos']}",
-                "preview_start": preview_start,
-                "key_items": key_items
-            })
-
-        return previews
-
-    @staticmethod
-    def search_node(node: MindmupNode, keyword: str, max_result: int = 50) -> List[Dict[str, Any]]:
-        """Search for node containing keyword in title.
-
-        Args:
-            node: Root node to start search from
-            keyword: Keyword to search for
-            max_result: Maximum number of result to return
-
-        Returns:
-            List of matching node with path and children
-        """
-        result = []
-        keyword_lower = keyword.lower()
-
-        def search_recursive(current_node: MindmupNode, path: str = ""):
-            if len(result) >= max_result:
-                return
-
-            current_path = f"{path} > {current_node.title}" if path else current_node.title
-
-            # Check if keyword is in title
-            if keyword_lower in current_node.title.lower():
-                node_info = {
-                    "title": current_node.title,
-                    "path": current_path,
-                    "children_count": len(current_node.children),
-                    "children": [child.title for child in current_node.children[:10]]
-                }
-
-                # Add attribute if exists
-                if current_node.attribute:
-                    node_info['attribute'] = current_node.attribute
-
-                result.append(node_info)
-
-            # Search in children
-            for child in current_node.children:
-                search_recursive(current_node=child, path=current_path)
-
-        search_recursive(node)
-        return result
+def _iter_descendants(node: MindmupNode):
+    """Yield all descendants of a node. Module-level helper, NOT inside MindmupParser."""
+    for child in node.children:
+        yield child
+        yield from _iter_descendants(child)

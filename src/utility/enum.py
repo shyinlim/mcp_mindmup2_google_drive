@@ -8,7 +8,7 @@ class MimeType(str, Enum):
     TEXT = 'text/plain'
     FOLDER = 'application/vnd.google-apps.folder'
     MINDMUP = 'application/vnd.mindmup'
-    OCTET = 'application/octet-stream'
+    OCTET = 'application/octet-stream'  # GDrive returns this for .mup files instead of application/vnd.mindmup
 
 
 # Google Apps MIME types that cannot be directly downloaded

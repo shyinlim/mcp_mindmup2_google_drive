@@ -1,23 +1,21 @@
-import time
-from typing import Optional, Dict, Tuple, List, Any
+from datetime import datetime
+from typing import Optional, Dict, List, Any
 
-from src.model.common_model import OperationResult
-from src.model.gdrive_model import SearchQuery, create_file_info
-from src.utility.logger import get_logger
-
+from src.core import gdrive_cache
 from src.core.gdrive_client import GoogleDriveClient
+from src.model.common_model import OperationResult
+from src.model.gdrive_model import FileInfo, SearchQuery, create_file_info
+from src.utility.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 class GoogleDriveFeature:
 
-    def __init__(self, client: GoogleDriveClient):
+    def __init__(self, client: GoogleDriveClient, client_id: str, credential_hash: str):
         self.client = client
-
-        self._file_cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
-        self._cache_ttl = 300  # 5 mins
-        self._max_cache_size = 100  # Cache 100 files
+        self.client_id = client_id
+        self.credential_hash = credential_hash
 
     async def list_file(
             self, query: Optional[SearchQuery] = None) -> OperationResult:
@@ -52,7 +50,7 @@ class GoogleDriveFeature:
             logger.error(error_message)
             return OperationResult.fail(detail=error_message)
 
-    async def search_mindmup_file(self, name_contain: Optional[str] = None) -> List:
+    async def search_mindmup_file(self, name_contain: Optional[str] = None) -> List[FileInfo]:
         """Search for MindMup files in Google Drive.
 
         Args:
@@ -86,7 +84,10 @@ class GoogleDriveFeature:
 
             # Sort by modification time (newest first)
             mindmup_files = list(found_files.values())
-            mindmup_files.sort(key=lambda x: x.modified_time or x.created_time, reverse=True)
+            mindmup_files.sort(
+                key=lambda x: x.modified_time or x.created_time or datetime.min,
+                reverse=True,
+            )
 
             logger.info(f'search_mindmup_file found {len(mindmup_files)} files')
             return mindmup_files
@@ -109,20 +110,19 @@ class GoogleDriveFeature:
             logger.error(f'get_file_metadata error: {file_id}, {e}')
             return {}
 
-    async def download_file_content(self, file_id: str) -> OperationResult:
-        """Download file from GDrive, include cache."""
-        try:
-            # Check cache
-            if file_id in self._file_cache:
-                cached_data, cached_time = self._file_cache[file_id]
-                if time.time() - cached_time < self._cache_ttl:
-                    logger.info(f'Using cached content for file: {file_id}')
-                    return OperationResult.success(detail=cached_data)
-                else:
-                    # If almost expire then clean cache
-                    del self._file_cache[file_id]
+    async def fetch_file_content(self, file_id: str) -> OperationResult:
+        """Download file from GDrive with module-level cache.
 
-            logger.info(f'download_file_content: {file_id}')
+        Cache is keyed by (client_id, credential_hash, file_id) so entries are
+        isolated per AI client and per service account. See src/core/gdrive_cache.py.
+        """
+        cache_key = (self.client_id, self.credential_hash, file_id)
+        cached = gdrive_cache.get(cache_key)
+        if cached is not None:
+            return OperationResult.success(detail=cached)
+
+        try:
+            logger.info(f'fetch_file_content: {file_id}')
 
             file_metadata = await self.client.run_sync(
                 lambda: self.client.service.files().get(
@@ -137,12 +137,10 @@ class GoogleDriveFeature:
                 lambda: self.client.service.files().get_media(fileId=file_id).execute()
             )
 
-            # Check content valid or not
             if file_content is None:
                 return OperationResult.fail(
                     detail=f'{file_id} cannot be downloaded.')
 
-            # According to MIME do decode
             if isinstance(file_content, bytes):
                 try:
                     content_str = file_content.decode('utf-8')
@@ -151,13 +149,12 @@ class GoogleDriveFeature:
             else:
                 content_str = str(file_content)
 
-            # Check content is null or not
             if not content_str:
                 return OperationResult.fail(
                     detail=f'{file_id} empty or unreadable.')
 
             logger.info(
-                f'download_file_content success: {file_metadata.get("name")} ({len(content_str)} characters)')
+                f'fetch_file_content success: {file_metadata.get("name")} ({len(content_str)} characters)')
 
             result_data = {
                 "file_id": file_id,
@@ -167,44 +164,10 @@ class GoogleDriveFeature:
                 "content_str": content_str
             }
 
-            # The result add to cache
-            self._file_cache[file_id] = (result_data, time.time())
-            logger.info(f'Cached file content for: {file_id}')
-
-            # Clean up the cache almost expire
-            self._cleanup_cache()
-
+            gdrive_cache.put(cache_key, result_data)
             return OperationResult.success(detail=result_data)
 
         except Exception as e:
-            error_message = f'download_file_content error: {file_id}, {e}'
+            error_message = f'fetch_file_content error: {file_id}, {e}'
             logger.error(error_message)
             return OperationResult.fail(error_message)
-
-    def _cleanup_cache(self):
-        """Remove expired cache entries and enforce max cache size."""
-        current_time = time.time()
-
-        # Remove expired entries
-        expired_keys = [
-            file_id for file_id, (_, timestamp) in self._file_cache.items()
-            if current_time - timestamp > self._cache_ttl
-        ]
-
-        for key in expired_keys:
-            del self._file_cache[key]
-
-        # If cache is too large, remove oldest entries
-        if len(self._file_cache) > self._max_cache_size:
-            sorted_items = sorted(
-                self._file_cache.items(),
-                key=lambda x: x[1][1]
-            )
-
-            items_to_remove = len(self._file_cache) - self._max_cache_size
-            for i in range(items_to_remove):
-                file_id = sorted_items[i][0]
-                del self._file_cache[file_id]
-
-        if expired_keys:
-            logger.info(f'Cache cleanup: removed {len(expired_keys)} expired, {len(self._file_cache)} remaining')
