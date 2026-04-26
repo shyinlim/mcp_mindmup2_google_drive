@@ -44,7 +44,7 @@ A Model Context Protocol (MCP) server that lets AI clients (Claude Code, Cursor)
 ### Prerequisites
 
 - Python 3.12+
-- Docker & docker-compose (required for `make run-dev-docker` / `make run-prod`)
+- Docker & docker-compose (required for `make run-dev-docker` / `make run-prod`) ; Ref. [makefile](makefile)
 - Google Cloud Platform account
 - An MCP client that supports HTTP transport (Claude Code or Cursor)
 
