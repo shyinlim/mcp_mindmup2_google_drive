@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/shyinlim-mcp-mindmup2-google-drive-badge.png)](https://mseep.ai/app/shyinlim-mcp-mindmup2-google-drive)
+
 # MindMup2 Google Drive MCP Server
 
 A Model Context Protocol (MCP) server that lets AI clients (Claude Code, Cursor) **search, read, and drill into [MindMup 2](https://drive.mindmup.com/) `.mup` mind maps stored in Google Drive** — without dumping a 3MB JSON tree into the model. Large maps are auto-summarised into a tree outline; the AI then drills into specific sections by `node_path`.
